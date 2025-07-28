@@ -58,7 +58,7 @@ page = st.sidebar.radio("페이지 이동", [
 ])
 
 st.sidebar.markdown("---")
-st.sidebar.markdown("### 🎭 학습 도우미")
+st.sidebar.markdown("### 🎭 학습 도우미 수정")
 if os.path.exists(CHARACTER_VIDEO_PATH):
     st.sidebar.video(CHARACTER_VIDEO_PATH, start_time=0)
 else:

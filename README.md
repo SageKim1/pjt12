@@ -39,12 +39,11 @@ PDF 강의자료를 업로드하여 **AI 챗봇**과 **자동 퀴즈 생성기**
 - **시각화**: Matplotlib  
 
 ### 📊 평가 도구: bert_score_eval.py
-- **역할**: 챗봇 답변 및 퀴즈 생성 결과의 **텍스트 유사도(BERTScore)** 평가를 위한 스크립트  
-- **활용 예시**: 모델 응답과 정답 데이터셋을 비교하여 정량적 성능 분석 가능  
-- **사용 방법**:
-```bash
-python bert_score_eval.py --predictions preds.txt --references refs.txt
-```
+- **역할**: OpenAI 및 Claude 모델의 **RAG 응답 vs Non-RAG 응답** 및 모델 간 응답 유사도를 **BERTScore 기반**으로 비교/분석하는 스크립트
+- **활용 예시**: 동일 질문에 대해
+  - RAG 적용 여부에 따른 응답 차이 분석
+  - 모델 간 응답 유사도 비교(OpenAI vs Claude 등)
+- **출력**: 비교 결과를 CSV로 저장하여 모델 성능/응답 경향 분석에 활용 가능
 
 ---
 

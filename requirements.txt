@@ -7,3 +7,6 @@ langchain-openai>=0.0.5
 faiss-cpu>=1.7.4
 PyPDF2>=3.0.1
 pydantic>=2.0.0
+duckduckgo-search
+beautifulsoup4
+requests

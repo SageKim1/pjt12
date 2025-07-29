@@ -37,4 +37,4 @@ class Config:
     # UI 설정
     APP_TITLE = "대학강의 PDF 챗봇 & 퀴즈 생성기"
     APP_DESCRIPTION = "PDF 강의자료를 업로드하여 맞춤형 학습 도우미를 만드세요!"
-    CHARACTER_VIDEO_PATH = os.getenv("CHARACTER_VIDEO_PATH", "character.mp4")
+    CHARACTER_VIDEO_PATH = os.getenv("CHARACTER_VIDEO_PATH", "video_02.mp4")

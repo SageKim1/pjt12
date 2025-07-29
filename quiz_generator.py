@@ -1,10 +1,9 @@
 import json
 import random
 import re
-import ast
 from typing import List, Optional, Union
 import streamlit as st
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 from config import Config
 from vector_store import MultiSubjectVectorStoreManager
 from utils.web_tools import fetch_link_content
@@ -32,7 +31,7 @@ else:
 class Quiz(BaseModel):
     type: str  # "multiple", "short", "ox"
     question: str
-    options: Optional[List[str]] = None
+    options: Optional[List[str]] = Field(default_factory=list)  # ✅ 빈 리스트 기본값
     correct_answer: Union[str, int]
     explanation: str
     subject: str
@@ -59,24 +58,25 @@ class MultiSubjectQuizGen:
         return "\n".join(d.page_content for d in docs)
 
     def _safe_parse_json(self, raw: str):
+        """안전하게 JSON 문자열을 파싱"""
+        if not raw:
+            st.error("빈 RAW 데이터가 입력되었습니다.")
+            return None
+        
+        # 코드 블록 제거 (```json 또는 ```)
         raw = raw.strip()
-        raw = re.sub(r'``````', '', raw, flags=re.DOTALL | re.IGNORECASE)
-        match = re.search(r'(\[[\s\S]*?\]|\{[\s\S]*?\})', raw)
-        if match:
-            raw = match.group(0)
-        open_count, close_count = raw.count("{"), raw.count("}")
-        if close_count < open_count:
-            raw += "}" * (open_count - close_count)
-        open_arr, close_arr = raw.count("["), raw.count("]")
-        if close_arr < open_arr:
-            raw += "]" * (open_arr - close_arr)
+        raw = re.sub(r'```(?:json)?\s*|\s*```', '', raw, flags=re.DOTALL | re.IGNORECASE)
+        
         try:
-            return json.loads(raw)
-        except json.JSONDecodeError:
-            try:
-                return ast.literal_eval(raw)
-            except Exception:
+            parsed = json.loads(raw)
+            if not isinstance(parsed, list):
+                st.error(f"파싱된 데이터가 리스트 형식이 아닙니다. 원본 데이터: {raw}")
                 return None
+            return parsed
+        except json.JSONDecodeError as e:
+            st.error(f"JSON 파싱 실패: {str(e)}")
+            st.write("🔎 **원본 RAW 데이터 (디버그용)**:", raw)
+            return None
 
     def _get_difficulty_guideline(self, difficulty: str) -> str:
         if difficulty == "쉬움":
@@ -87,62 +87,95 @@ class MultiSubjectQuizGen:
             return "어려운 난이도: 추론과 종합적 사고가 필요한 문제."
         return "일반 난이도: 균형 있게 출제."
 
-    def generate(self, subject_name: str, n=5, difficulty="보통", topic="", quiz_type="객관식"):
+    def _normalize_options(self, options):
+        """옵션을 문자열 리스트로 강제 변환"""
+        if isinstance(options, dict):
+            st.write("🔎 **options가 딕셔너리 형태로 입력됨**: ", options)
+            return [str(options.get(str(i), options.get(i, ""))) for i in range(len(options))]
+        elif isinstance(options, list):
+            return [str(v) for v in options]
+        else:
+            st.write("⚠️ **options가 예상치 못한 형태**: ", options)
+            return []
+
+    def generate(self, subject_name: str, n=5, difficulty="보통", topic="", quiz_type="혼합"):
         ctx = self._get_context(subject_name, topic)
         if not ctx:
-            st.error(f"{subject_name} 과목의 자료가 없습니다. PDF를 업로드하세요.")
-            return [Quiz(type="ox", question="테스트 OX 문제", options=["O", "X"], correct_answer=0, explanation="테스트 해설", subject=subject_name)]
+            st.error(f"{subject_name} 과목의 자료가 없습니다. PDF를 업로드한 후 다시 시도하세요.")
+            return []
 
         guideline = self._get_difficulty_guideline(difficulty)
-        type_desc = {
-            "혼합": "객관식, 주관식, OX를 섞어서 생성.",
-            "주관식": "모두 주관식 (short answer).",
-            "OX": "모두 OX 퀴즈 (options: ['O', 'X'], correct_answer: 0 또는 1).",
-            "객관식": "모두 객관식 (multiple choice)."
-        }.get(quiz_type, "모두 객관식 (multiple choice).")
 
         prompt = f"""
 너는 '{subject_name}' 과목의 강의자료 기반 퀴즈 생성기야.
-아래 context 내용으로 {n}개의 {difficulty} 난이도 퀴즈를 생성해. 유형: {type_desc}
-출제 규칙: {guideline}
-반드시 JSON 배열 형식으로만 출력해.
+아래 context 내용을 참고하여 {n}개의 {difficulty} 난이도 퀴즈를 생성해.
+- 객관식은 보기(options)를 반드시 4개 포함하고 correct_answer는 보기의 인덱스(0~3)로 지정.
+- OX는 options ["O","X"], correct_answer는 0(O) 또는 1(X)만 가능.
+- 주관식은 correct_answer를 문자열로.
+- options는 반드시 리스트 형태로 출력 (딕셔너리 불가).
+- 반드시 JSON 배열 형식만 출력. 추가 설명 문장은 출력하지 마세요.
 
-각 퀴즈의 type: "multiple", "short", "ox"
-예시 출력:
+예시:
 [
-  {{"type": "multiple", "question": "문제", "options": ["A","B","C","D"], "correct_answer": 0, "explanation": "해설", "subject": "{subject_name}"}},
-  {{"type": "short", "question": "문제", "correct_answer": "정답단어", "explanation": "해설", "subject": "{subject_name}"}},
-  {{"type": "ox", "question": "문제", "options": ["O","X"], "correct_answer": 0, "explanation": "해설", "subject": "{subject_name}"}}
+{{"type": "multiple", "question": "문제", "options": ["A", "B", "C", "D"], "correct_answer": 0, "explanation": "해설", "subject": "{subject_name}"}},
+{{"type": "short", "question": "문제", "correct_answer": "정답단어", "explanation": "해설", "subject": "{subject_name}"}},
+{{"type": "ox", "question": "문제", "options": ["O", "X"], "correct_answer": 0, "explanation": "해설", "subject": "{subject_name}"}}
 ]
 
 context:
 {ctx}
 """
+
         with st.spinner(f"{subject_name} {difficulty} 퀴즈 생성 중..."):
             try:
                 raw = self.llm.invoke(prompt).content.strip()
             except Exception as e:
-                st.error(f"LLM 호출 실패: {str(e)}")
+                st.error(f"LLM 호출 실패: {str(e)}. API 키나 네트워크를 확인하세요.")
                 return []
+
             data = self._safe_parse_json(raw)
             if not data or not isinstance(data, list):
-                st.error(f'퀴즈 파싱 실패.\n--- LLM 응답 ---\n{raw}')
+                st.error(f"퀴즈 파싱 실패.")
+                st.write("🔎 **LLM RAW 응답 (디버그용)**:")
+                st.code(raw)
                 return []
 
             valid_quizzes = []
             for q in data:
                 try:
-                    if q["type"] == "multiple" and len(q.get("options", [])) == 4:
-                        valid_quizzes.append(Quiz(**q))
-                    elif q["type"] == "short" and isinstance(q["correct_answer"], str):
-                        valid_quizzes.append(Quiz(**q))
-                    elif q["type"] == "ox" and q.get("options") == ["O", "X"]:
-                        valid_quizzes.append(Quiz(**q))
-                except Exception:
-                    continue
+                    if not isinstance(q, dict):
+                        st.write(f"⚠️ 문제 형식이 딕셔너리가 아님: {q}")
+                        continue
+                    q_type = q.get("type", "").lower()
+                    question = str(q.get("question", "")).strip()
+                    explanation = q.get("explanation") or "해설이 제공되지 않았습니다."
+                    options = self._normalize_options(q.get("options", []))
+                    correct_answer = q.get("correct_answer")
 
-            if not valid_quizzes:
-                st.warning("생성된 유효 퀴즈가 없습니다.")
+                    # 객관식
+                    if q_type == "multiple" and len(options) >= 2:
+                        if isinstance(correct_answer, str) and correct_answer in options:
+                            correct_answer = options.index(correct_answer)
+                        if isinstance(correct_answer, (int, float)) and 0 <= int(correct_answer) < len(options):
+                            valid_quizzes.append(
+                                Quiz(type=q_type, question=question, options=options,
+                                     correct_answer=correct_answer, explanation=explanation, subject=subject_name)
+                            )
+                    # 주관식
+                    elif q_type == "short" and isinstance(correct_answer, str):
+                        valid_quizzes.append(
+                            Quiz(type=q_type, question=question, options=[],
+                                 correct_answer=correct_answer, explanation=explanation, subject=subject_name)
+                        )
+                    # OX
+                    elif q_type == "ox" and [opt.upper() for opt in options] == ["O", "X"] and correct_answer in [0, 1]:
+                        valid_quizzes.append(
+                            Quiz(type=q_type, question=question, options=options,
+                                 correct_answer=correct_answer, explanation=explanation, subject=subject_name)
+                        )
+                except Exception as e:
+                    st.write(f"⚠️ 문제 검증 중 오류: {e}, 문제={q}")
+
             return valid_quizzes
 
 # ===== 링크 기반 퀴즈 생성 =====
@@ -153,28 +186,71 @@ def generate_quiz_from_link(url: str, n: int = 3):
         return []
 
     prompt = f"""
-다음 링크 내용을 기반으로 총 {n}개의 혼합형 퀴즈를 생성해.
-객관식, 주관식, OX를 섞어 JSON 배열로만 출력.
+다음 링크 내용을 기반으로 총 {n}개의 혼합형 퀴즈(객관식, 주관식, OX)를 생성해.
+- 객관식은 보기(options)를 반드시 4개 포함하고 correct_answer는 보기의 인덱스(0~3)로 지정.
+- OX는 options를 정확히 ["O", "X"]로 설정하고, correct_answer는 0(O) 또는 1(X)만 가능.
+- 주관식은 correct_answer를 문자열로.
+- options는 반드시 리스트 형태로 출력 (딕셔너리 불가).
+- 반드시 JSON 배열 형식만 출력. 추가 설명 문장은 출력하지 마.
+
+예시:
+[
+{{"type": "multiple", "question": "문제", "options": ["A", "B", "C", "D"], "correct_answer": 0, "explanation": "해설", "subject": "링크퀴즈"}},
+{{"type": "short", "question": "문제", "correct_answer": "정답단어", "explanation": "해설", "subject": "링크퀴즈"}},
+{{"type": "ox", "question": "문제", "options": ["O", "X"], "correct_answer": 0, "explanation": "해설", "subject": "링크퀴즈"}}
+]
 
 내용:
 {content}
 """
-    raw = llm.invoke(prompt).content.strip()
+    try:
+        raw = llm.invoke(prompt).content.strip()
+    except Exception as e:
+        st.error(f"LLM 호출 실패: {str(e)}. API 키나 네트워크를 확인하세요.")
+        return []
+
     generator = MultiSubjectQuizGen(vs_manager=None)
     data = generator._safe_parse_json(raw)
     if not data or not isinstance(data, list):
-        st.error(f'퀴즈 파싱 실패.\n--- LLM 응답 ---\n{raw}')
+        st.error(f"퀴즈 파싱 실패.")
+        st.write("🔎 **LLM RAW 응답 (디버그용)**:")
+        st.code(raw)
         return []
 
     valid_quizzes = []
     for q in data:
         try:
-            if q["type"] == "multiple" and len(q.get("options", [])) == 4:
-                valid_quizzes.append(Quiz(**q))
-            elif q["type"] == "short":
-                valid_quizzes.append(Quiz(**q))
-            elif q["type"] == "ox" and q.get("options") == ["O", "X"]:
-                valid_quizzes.append(Quiz(**q))
-        except Exception:
-            continue
+            if not isinstance(q, dict):
+                st.write(f"⚠️ 문제 형식이 딕셔너리가 아님: {q}")
+                continue
+            q_type = q.get("type", "").lower()
+            question = str(q.get("question", "")).strip()
+            explanation = q.get("explanation") or "해설이 제공되지 않았습니다."
+            options = generator._normalize_options(q.get("options", []))
+            correct_answer = q.get("correct_answer")
+
+            # 객관식
+            if q_type == "multiple" and len(options) >= 2:
+                if isinstance(correct_answer, str) and correct_answer in options:
+                    correct_answer = options.index(correct_answer)
+                if isinstance(correct_answer, (int, float)) and 0 <= int(correct_answer) < len(options):
+                    valid_quizzes.append(
+                        Quiz(type=q_type, question=question, options=options,
+                             correct_answer=correct_answer, explanation=explanation, subject="링크퀴즈")
+                    )
+            # 주관식
+            elif q_type == "short" and isinstance(correct_answer, str):
+                valid_quizzes.append(
+                    Quiz(type=q_type, question=question, options=[],
+                         correct_answer=correct_answer, explanation=explanation, subject="링크퀴즈")
+                )
+            # OX
+            elif q_type == "ox" and [opt.upper() for opt in options] == ["O", "X"] and correct_answer in [0, 1]:
+                valid_quizzes.append(
+                    Quiz(type=q_type, question=question, options=options,
+                         correct_answer=correct_answer, explanation=explanation, subject="링크퀴즈")
+                )
+        except Exception as e:
+            st.write(f"⚠️ 문제 검증 중 오류: {e}, 문제={q}")
+
     return valid_quizzes

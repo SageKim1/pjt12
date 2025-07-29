@@ -4,7 +4,7 @@ import os
 load_dotenv()
 
 class Config:
-    MODEL_TYPE = os.getenv("MODEL_TYPE", "claude")  # "openai" 또는 "claude"
+    MODEL_TYPE = os.getenv("MODEL_TYPE", "openai")  # "openai" 또는 "claude"
     OPENAI_API_KEY = os.getenv("OPENAI_API_KEY", "")
     ANTHROPIC_API_KEY = os.getenv("ANTHROPIC_API_KEY", "")
     

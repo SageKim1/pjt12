@@ -7,6 +7,9 @@ from vector_store import MultiSubjectVectorStoreManager
 from chatbot import MultiSubjectChatbot
 from quiz_generator import MultiSubjectQuizGen, Quiz, generate_quiz_from_link
 from utils.web_tools import web_search, fetch_link_content, save_web_results_to_vectorstore
+from collections import Counter, defaultdict
+import matplotlib.pyplot as plt
+import platform
 
 # =========================
 # Streamlit 메인 학습 앱
@@ -26,9 +29,10 @@ if "vs_manager" not in st.session_state:
     st.session_state.current_quiz_index = 0
     st.session_state.quiz_answers = {}
     st.session_state.quiz_completed = False
+    st.session_state.quiz_history = {}  # ✅ 과목별 생성된 퀴즈 수 추적
 
 # 새로운 동영상 파일 경로
-CHARACTER_VIDEO_PATH = Config.CHARACTER_VIDEO_PATH  # Config에서 불러오기
+CHARACTER_VIDEO_PATH = Config.CHARACTER_VIDEO_PATH
 CHARACTER_VIDEO_WIDTH = 150
 
 def play_character_video_html():
@@ -43,7 +47,7 @@ def play_character_video_html():
 def add_to_wrong_answers(quiz, user_answer):
     if isinstance(quiz, Quiz):
         wrong_item = {
-            "subject": quiz.subject,
+            "subject": "링크퀴즈" if "링크" in quiz.subject else quiz.subject,  # ✅ 링크퀴즈는 명칭 통일
             "question": quiz.question,
             "options": quiz.options,
             "correct_answer": quiz.correct_answer,
@@ -53,7 +57,7 @@ def add_to_wrong_answers(quiz, user_answer):
         }
     else:
         wrong_item = {
-            "subject": quiz.get("subject", ""),
+            "subject": "링크퀴즈" if "링크" in quiz.get("subject", "") else quiz.get("subject", ""),
             "question": quiz.get("question", ""),
             "options": quiz.get("options", None),
             "correct_answer": quiz.get("correct_answer"),
@@ -62,6 +66,7 @@ def add_to_wrong_answers(quiz, user_answer):
             "type": quiz.get("type", "multiple")
         }
     st.session_state.wrong_answers.append(wrong_item)
+
 
 st.set_page_config(page_title=Config.APP_TITLE, page_icon="📚", layout="wide")
 
@@ -75,7 +80,6 @@ else:
     selected_subject = st.sidebar.selectbox("📖 과목 선택", [""] + subjects, key="sidebar_subject")
     if selected_subject.strip():
         st.session_state.current_subject = selected_subject
-
 
 # 페이지 상태
 if "selected_page" not in st.session_state:
@@ -184,9 +188,8 @@ elif page == "💬 챗봇":
                                     st.write(f"{i+1}. {source.metadata.get('source', '알 수 없음')}")
             st.session_state.chat_history[subject].append({"question": question, "answer": answer})
 
-
 # ==============================
-# 📝 퀴즈 생성 (퀴즈 유형 포함)
+# 📝 퀴즈 생성
 # ==============================
 elif page == "📝 퀴즈 생성":
     st.header("📝 퀴즈 자동 생성")
@@ -195,25 +198,32 @@ elif page == "📝 퀴즈 생성":
     else:
         subject = st.session_state.current_subject
         st.info(f"현재 과목: **{subject}**")
-        col1, col2, col3, col4 = st.columns(4)
+        
+        col1, col2, col3 = st.columns(3)
         with col1: num_questions = st.number_input("문항 수", 1, 20, 5, key="q_num")
         with col2: difficulty = st.selectbox("난이도", ["쉬움", "보통", "어려움"], key="q_dif")
         with col3: topic = st.text_input("특정 주제 (선택사항)", key="q_topic")
-        with col4: quiz_type = st.selectbox("퀴즈 유형", ["객관식", "주관식", "OX", "혼합"], key="q_type")
+
         if st.button("🎲 퀴즈 생성"):
             with st.spinner("퀴즈 생성 중..."):
-                quizzes = st.session_state.qg.generate(subject, num_questions, difficulty, topic, quiz_type)
+                quizzes = st.session_state.qg.generate(subject, num_questions, difficulty, topic, quiz_type="혼합")
                 if quizzes:
+                    # ✅ 퀴즈 히스토리에 기록
+                    if subject not in st.session_state.quiz_history:
+                        st.session_state.quiz_history[subject] = 0
+                    st.session_state.quiz_history[subject] += len(quizzes)
                     st.session_state.current_quizzes = quizzes
                     st.session_state.quiz_subject = subject
                     st.session_state.current_quiz_index = 0
                     st.session_state.quiz_answers = {}
                     st.session_state.quiz_completed = False
-                    st.success(f"{len(quizzes)}개의 퀴즈가 생성되었습니다!")
-                    st.session_state.selected_page = "🎯 퀴즈 풀기"
-                    st.rerun()
+                    st.success(f"✅ {len(quizzes)}개의 퀴즈가 생성되었습니다!")
+                    # st.info("사이드바에서 '🎯 퀴즈 풀기'를 선택하거나 아래 버튼을 클릭하여 퀴즈를 풀 수 있습니다.")
+                    # if st.button("🎯 퀴즈 풀기 페이지로 이동", key="go_to_quiz"):
+                    #     st.session_state.selected_page = "🎯 퀴즈 풀기"
+                    #     st.rerun()
                 else:
-                    st.error("퀴즈 생성 실패! PDF 업로드 및 API 키를 확인하세요.")
+                    st.error("퀴즈 생성 실패! PDF 자료, API 키, 또는 LLM 응답 형식을 확인하세요. 디버깅 로그를 확인하여 원인을 파악하세요.")
 
 # ==============================
 # 🎯 퀴즈 풀기
@@ -303,8 +313,6 @@ elif page == "🎯 퀴즈 풀기":
                 st.session_state.quiz_completed = False
                 st.rerun()
 
-
-
 # ==============================
 # ❌ 오답 노트 (PDF 다운로드 포함)
 # ==============================
@@ -335,7 +343,6 @@ elif page == "❌ 오답 노트":
             st.divider()
 
         if st.button("📄 오답 노트 PDF 다운로드"):
-            # ✅ 폰트 파일 존재 여부 체크
             if not os.path.exists("NotoSansKR-Regular.ttf") or not os.path.exists("NotoSansKR-Bold.ttf"):
                 st.warning("⚠ NotoSansKR 폰트 파일이 없습니다. PDF 다운로드가 정상 작동하지 않을 수 있습니다.")
             else:
@@ -343,7 +350,7 @@ elif page == "❌ 오답 노트":
                 import re
 
                 def sanitize(text):
-                    if not isinstance(text, str): 
+                    if not isinstance(text, str):
                         text = str(text)
                     text = re.sub(r"[\u200b-\u200d\uFEFF]", "", text)
                     return text.strip()
@@ -378,14 +385,14 @@ elif page == "❌ 오답 노트":
                 href = f'<a href="data:application/octet-stream;base64,{b64}" download="오답노트.pdf">📥 오답 노트 다운로드</a>'
                 st.markdown(href, unsafe_allow_html=True)
 
-
-# ---------- 🌐 웹 검색 & 링크 퀴즈 ----------
+# ==============================
+# 🌐 웹 검색 & 링크 퀴즈
+# ==============================
 elif page == "🌐 웹 검색 & 링크 퀴즈":
     st.header("🌐 웹 검색 & 링크 퀴즈")
 
     tab1, tab2 = st.tabs(["🔍 웹 검색", "🔗 링크 기반 퀴즈"])
 
-    # 🔍 웹 검색 탭
     with tab1:
         query = st.text_input("검색어 입력", placeholder="예: 위키독스 파이썬")
         if st.button("검색"):
@@ -396,7 +403,6 @@ elif page == "🌐 웹 검색 & 링크 퀴즈":
                         st.markdown(f"### [{r['title']}]({r['link']})")
                         st.write(r["snippet"])
                         st.divider()
-                    # ✅ 검색 결과 벡터스토어 저장 버튼
                     if st.button("이 검색 결과를 벡터스토어에 저장"):
                         save_web_results_to_vectorstore(
                             st.session_state.vs_manager,
@@ -409,7 +415,6 @@ elif page == "🌐 웹 검색 & 링크 퀴즈":
             else:
                 st.warning("검색어를 입력하세요.")
 
-    # 🔗 링크 기반 퀴즈 탭
     with tab2:
         url = st.text_input("퀴즈를 생성할 링크를 입력하세요", placeholder="예: https://wikidocs.net/book/1")
         num_q = st.number_input("문항 수", min_value=1, max_value=10, value=3, step=1)
@@ -423,28 +428,32 @@ elif page == "🌐 웹 검색 & 링크 퀴즈":
 
                     quizzes = generate_quiz_from_link(url, n=num_q)
                     if quizzes:
+                        if "링크퀴즈" not in st.session_state.quiz_history:
+                            st.session_state.quiz_history["링크퀴즈"] = 0
+                        st.session_state.quiz_history["링크퀴즈"] += len(quizzes)
                         st.session_state.current_quizzes = quizzes
                         st.session_state.quiz_subject = "웹 링크 퀴즈"
                         st.session_state.current_quiz_index = 0
                         st.session_state.quiz_answers = {}
                         st.session_state.quiz_completed = False
-                        st.success(f"✅ {len(quizzes)}개의 퀴즈가 생성되어 '🎯 퀴즈 풀기'에 추가되었습니다.")
-                        st.session_state.selected_page = "🎯 퀴즈 풀기"
-                        st.rerun()
+                        st.success(f"✅ {len(quizzes)}개의 퀴즈가 생성되었습니다!")
+                        # st.info("사이드바에서 '🎯 퀴즈 풀기'를 선택하거나 아래 버튼을 클릭하여 퀴즈를 풀 수 있습니다.")
+                        # if st.button("🎯 퀴즈 풀기 페이지로 이동", key="go_to_quiz_link"):
+                        #     st.session_state.selected_page = "🎯 퀴즈 풀기"
+                        #     st.rerun()
                     else:
                         st.error("퀴즈를 생성하지 못했습니다.")
             else:
                 st.warning("링크를 입력하세요.")
 
-# ---------- 📊 종합 리포트 ----------
+# ==============================
+# 📊 종합 리포트
+# ==============================
 elif page == "📊 종합 리포트":
     st.header("📊 종합 리포트 및 오답 통계")
     if not st.session_state.wrong_answers:
         st.info("아직 오답 기록이 없습니다.")
     else:
-        from collections import Counter, defaultdict
-        import matplotlib.pyplot as plt, platform
-
         # ✅ 폰트 설정
         if platform.system() == 'Windows':
             plt.rc('font', family='Malgun Gothic')
@@ -454,34 +463,52 @@ elif page == "📊 종합 리포트":
             plt.rc('font', family='NanumGothic')
         plt.rcParams['axes.unicode_minus'] = False
 
-        subject_count = Counter([w["subject"] for w in st.session_state.wrong_answers])
-        subjects, counts = zip(*subject_count.items())
-        fig, ax = plt.subplots(figsize=(6, 4))
-        bars = ax.bar(subjects, counts, color='#FF7F7F', width=0.5)
+        # ✅ 과목별 오답 비율 계산
+        subject_wrong_count = Counter([w["subject"] for w in st.session_state.wrong_answers])
+        subject_total_count = Counter(st.session_state.quiz_history)
+        subjects = list(subject_total_count.keys())
+        wrong_percentages = [
+            (subject_wrong_count.get(subject, 0) / subject_total_count[subject] * 100) if subject_total_count[subject] > 0 else 0
+            for subject in subjects
+        ]
+
+        # ✅ 막대그래프 (퍼센티지)
+        fig, ax = plt.subplots(figsize=(8, 5))
+        bars = ax.bar(subjects, wrong_percentages, color='#FF7F7F', width=0.5)
+        ax.set_ylabel("오답 비율 (%)")
+        ax.set_title("과목별 오답 비율")
+        ax.set_ylim(0, 100)  # 최대 100%
         for bar in bars:
-            ax.text(bar.get_x() + bar.get_width()/2, bar.get_height()+0.1, int(bar.get_height()), ha='center')
-        ax.set_ylabel("오답 수"); ax.set_title("과목별 오답 통계")
+            height = bar.get_height()
+            ax.text(bar.get_x() + bar.get_width()/2, height + 2, f"{height:.1f}%", ha='center')
         st.pyplot(fig)
+
+        # ✅ 상세 통계
+        st.subheader("📌 과목별 오답 통계")
+        for subject, total in subject_total_count.items():
+            wrong = subject_wrong_count.get(subject, 0)
+            percentage = (wrong / total * 100) if total > 0 else 0
+            st.write(f"• **{subject}**: {wrong}/{total} ({percentage:.1f}%)")
 
         # 취약 과목 분석
         st.subheader("📌 취약 과목 분석 및 복습 추천")
-        for subject, count in sorted(subject_count.items(), key=lambda x: x[1], reverse=True):
-            st.write(f"• **{subject}**: {count}개 오답 → 🔁 복습 권장")
-            if st.button(f"👉 {subject} 복습하기", key=f"go_{subject}"):
-                st.session_state.current_subject = subject
-                st.session_state.selected_page = "🎯 퀴즈 풀기"
-                st.rerun()
+        for subject, percentage in sorted(zip(subjects, wrong_percentages), key=lambda x: x[1], reverse=True):
+            total = subject_total_count[subject]
+            wrong = subject_wrong_count.get(subject, 0)
+            st.write(f"• **{subject}**: {wrong}/{total} ({percentage:.1f}%) → 🔁 복습 권장")
+            # if st.button(f"👉 {subject} 복습하기", key=f"go_{subject}_report"):
+            #     st.session_state.current_subject = subject
+            #     st.session_state.selected_page = "🎯 퀴즈 풀기"
+            #     st.rerun()
 
         # 키워드 분석
-        topic_counter = defaultdict(int)
-        for w in st.session_state.wrong_answers:
-            for word in w["explanation"].split():
-                if len(word) > 3: topic_counter[word] += 1
-        st.subheader("📌 오답 해설 주요 키워드")
-        for kw, freq in sorted(topic_counter.items(), key=lambda x: x[1], reverse=True)[:5]:
-            st.write(f"• **{kw}**: {freq}회 등장")
-
-
+        # topic_counter = defaultdict(int)
+        # for w in st.session_state.wrong_answers:
+        #     for word in w["explanation"].split():
+        #         if len(word) > 3: topic_counter[word] += 1
+        # st.subheader("📌 오답 해설 주요 키워드")
+        # for kw, freq in sorted(topic_counter.items(), key=lambda x: x[1], reverse=True)[:5]:
+        #     st.write(f"• **{kw}**: {freq}회 등장")
 
 # Sidebar 현황
 st.sidebar.markdown("---")

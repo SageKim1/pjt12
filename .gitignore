@@ -1,7 +1,8 @@
-memo.txt
 faiss_subjects/
 *.ttf
 *.pkl
+
+memo.txt
 
 # Byte-compiled / optimized / DLL files
 __pycache__/

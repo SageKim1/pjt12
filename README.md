@@ -38,6 +38,14 @@ PDF 강의자료를 업로드하여 **AI 챗봇**과 **자동 퀴즈 생성기**
 - **데이터 처리**: PyPDF2, BeautifulSoup, Requests  
 - **시각화**: Matplotlib  
 
+### 📊 평가 도구: bert_score_eval.py
+- **역할**: 챗봇 답변 및 퀴즈 생성 결과의 **텍스트 유사도(BERTScore)** 평가를 위한 스크립트  
+- **활용 예시**: 모델 응답과 정답 데이터셋을 비교하여 정량적 성능 분석 가능  
+- **사용 방법**:
+```bash
+python bert_score_eval.py --predictions preds.txt --references refs.txt
+```
+
 ---
 
 ## 🚀 설치 및 실행 방법
@@ -82,6 +90,7 @@ streamlit run app.py
 ├── pdf_processor.py      # PDF 처리 및 텍스트 분리
 ├── vector_store.py       # 벡터 스토어 관리
 ├── chatbot.py            # 챗봇 로직
+├── bert_score_eval.py    # BERTScore 기반 텍스트 평가 스크립트
 ├── utils/                # 웹 검색 및 기타 유틸리티
 ├── config.py             # API 키 및 설정 관리
 ├── requirements.txt      # 의존성 패키지

@@ -56,21 +56,32 @@ class MultiSubjectQuizGen:
 
     def _safe_parse_json(self, raw: str):
         raw = raw.strip()
-        try:
-            # JSON 그대로 로드 시도
-            return json.loads(raw)
-        except json.JSONDecodeError:
-            # "quizzes": [ ... ] 만 있는 부분 추출
-            quizzes_match = re.search(r'\{\s*"quizzes"\s*:\s*\[.*\]\s*\}', raw, re.DOTALL)
-            if quizzes_match:
-                try:
-                    return json.loads(quizzes_match.group(0))
-                except Exception:
-                    pass
+        import re, json, ast
+
+        # JSON 객체만 추출
+        match = re.search(r"\{[\s\S]*\}", raw)
+        if match:
+            json_str = match.group(0)  # 첫 번째 { ... } 블록만 추출
             try:
-                return ast.literal_eval(raw)
+                return json.loads(json_str)
+            except json.JSONDecodeError:
+                pass
+
+        # 리스트 형태 추출 (예: [ {...}, {...} ])
+        quizzes_match = re.search(r'\[\s*\{.*\}\s*\]', raw, re.DOTALL)
+        if quizzes_match:
+            try:
+                quizzes_raw = quizzes_match.group(0)
+                return {"quizzes": json.loads(quizzes_raw)}
             except Exception:
-                return None
+                pass
+
+        # 마지막 fallback
+        try:
+            return ast.literal_eval(raw)
+        except Exception:
+            return None
+
 
     def generate(self, subject_name: str, n=5, difficulty="보통", topic=""):
         ctx = self._get_context(subject_name, topic)
@@ -102,7 +113,7 @@ context:
 
         if not data or "quizzes" not in data:
             try:
-                data = json.loads(raw)  # 최종 재시도
+                data = json.loads(re.search(r"\{[\s\S]*\}", raw).group(0))  # 재시도
             except:
                 st.error(f'퀴즈 파싱 실패.\n--- LLM 응답 ---\n{raw}')
                 return []
@@ -160,7 +171,7 @@ def generate_quiz_from_link(url: str, n: int = 3):
 
     if not data or "quizzes" not in data:
         try:
-            data = json.loads(raw)  # 최종 재시도
+            data = json.loads(re.search(r"\{[\s\S]*\}", raw).group(0))  # 재시도
         except:
             st.error(f'퀴즈 파싱 실패.\n--- LLM 응답 ---\n{raw}')
             return []

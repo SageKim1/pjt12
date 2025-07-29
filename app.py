@@ -63,7 +63,8 @@ if subjects:
 if "selected_page" not in st.session_state:
     st.session_state.selected_page = "📁 PDF 업로드"
 
-page_list = ["📁 PDF 업로드", "💬 챗봇", "📝 퀴즈 생성", "🎯 퀴즈 풀기", "❌ 오답 노트", "🌐 웹 검색 & 링크 퀴즈"]
+page_list = ["📁 PDF 업로드", "💬 챗봇", "📝 퀴즈 생성", "🎯 퀴즈 풀기", "❌ 오답 노트", "🌐 웹 검색 & 링크 퀴즈", "📊 종합 리포트"]
+
 
 # ✅ st.sidebar.radio에 상태 반영
 page = st.sidebar.radio(
@@ -315,6 +316,46 @@ elif page == "❌ 오답 노트":
             st.session_state.wrong_answers = []
             st.success("오답 노트가 초기화되었습니다.")
             st.rerun()
+            
+    if st.button("📄 오답 노트 PDF 다운로드"):
+        from fpdf import FPDF
+        from io import BytesIO
+        import base64, re
+
+        def sanitize(text):
+            if not isinstance(text, str): text = str(text)
+            text = re.sub(r"[\u200b-\u200d\uFEFF]", "", text)
+            text = re.sub(r"[\x00-\x1F\x7F]", "", text)
+            return text.strip()
+
+        class PDF(FPDF):
+            def header(self):
+                self.set_font('NotoSansKR', 'B', 16)
+                self.cell(0, 10, sanitize('오답 노트'), ln=True, align='C')
+                self.ln(5)
+
+        pdf = PDF()
+        pdf.add_font('NotoSansKR', '', 'NotoSansKR-Regular.ttf', uni=True)
+        pdf.add_font('NotoSansKR', 'B', 'NotoSansKR-Bold.ttf', uni=True)
+        pdf.set_auto_page_break(auto=True, margin=15)
+        pdf.add_page()
+
+        for idx, w in enumerate(st.session_state.wrong_answers, 1):
+            pdf.set_font('NotoSansKR', 'B', 12)
+            pdf.multi_cell(0, 10, sanitize(f"{idx}. [{w['subject']}] {w['question']}"))
+            pdf.set_font('NotoSansKR', '', 11)
+            for i, opt in enumerate(w["options"]):
+                mark = "[정답]" if i == w["correct_answer"] else ("[내 답]" if i == w["user_answer"] else "")
+                pdf.multi_cell(0, 8, sanitize(f"{chr(65+i)}. {opt} {mark}"))
+            pdf.set_font('NotoSansKR', '', 10)
+            pdf.multi_cell(0, 8, sanitize(f"해설: {w['explanation']}"))
+            pdf.ln(5)
+
+        pdf_bytes = pdf.output(dest="S").encode("latin1")  # PDF를 바이트로 반환
+        b64 = base64.b64encode(pdf_bytes).decode()
+        href = f'<a href="data:application/octet-stream;base64,{b64}" download="오답노트.pdf">📥 오답 노트 다운로드</a>'
+        st.markdown(href, unsafe_allow_html=True)
+
 
 # ---------- 웹 검색 & 링크 퀴즈 ----------
 elif page == "🌐 웹 검색 & 링크 퀴즈":
@@ -383,6 +424,53 @@ elif page == "🌐 웹 검색 & 링크 퀴즈":
                         st.error("퀴즈를 생성하지 못했습니다.")
             else:
                 st.warning("링크를 입력하세요.")
+
+
+# ---------- 종합 리포트 ----------
+elif page == "📊 종합 리포트":
+    st.header("📊 종합 리포트 및 오답 통계")
+    if not st.session_state.wrong_answers:
+        st.info("아직 오답 기록이 없습니다.")
+    else:
+        from collections import Counter, defaultdict
+        import matplotlib.pyplot as plt, platform
+
+        # ✅ 폰트 설정
+        if platform.system() == 'Windows':
+            plt.rc('font', family='Malgun Gothic')
+        elif platform.system() == 'Darwin':
+            plt.rc('font', family='AppleGothic')
+        else:
+            plt.rc('font', family='NanumGothic')
+        plt.rcParams['axes.unicode_minus'] = False
+
+        subject_count = Counter([w["subject"] for w in st.session_state.wrong_answers])
+        subjects, counts = zip(*subject_count.items())
+        fig, ax = plt.subplots(figsize=(6, 4))
+        bars = ax.bar(subjects, counts, color='#FF7F7F', width=0.5)
+        for bar in bars:
+            ax.text(bar.get_x() + bar.get_width()/2, bar.get_height()+0.1, int(bar.get_height()), ha='center')
+        ax.set_ylabel("오답 수"); ax.set_title("과목별 오답 통계")
+        st.pyplot(fig)
+
+        # 취약 과목 분석
+        st.subheader("📌 취약 과목 분석 및 복습 추천")
+        for subject, count in sorted(subject_count.items(), key=lambda x: x[1], reverse=True):
+            st.write(f"• **{subject}**: {count}개 오답 → 🔁 복습 권장")
+            if st.button(f"👉 {subject} 복습하기", key=f"go_{subject}"):
+                st.session_state.current_subject = subject
+                st.session_state.selected_page = "🎯 퀴즈 풀기"
+                st.rerun()
+
+        # 키워드 분석
+        topic_counter = defaultdict(int)
+        for w in st.session_state.wrong_answers:
+            for word in w["explanation"].split():
+                if len(word) > 3: topic_counter[word] += 1
+        st.subheader("📌 오답 해설 주요 키워드")
+        for kw, freq in sorted(topic_counter.items(), key=lambda x: x[1], reverse=True)[:5]:
+            st.write(f"• **{kw}**: {freq}회 등장")
+
 
 
 # Sidebar 현황 유지

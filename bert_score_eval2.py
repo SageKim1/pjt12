@@ -136,20 +136,6 @@ for m1, m2 in itertools.combinations(models.keys(), 2):
 # ===========================
 # 6️⃣ CSV 저장
 # ===========================
-# (1) BERTScore 결과 CSV
 df_scores = pd.DataFrame(results)
 df_scores.to_csv(f"bert_scores_comparison_{subject}.csv", index=False, encoding="utf-8-sig")
-print(f"\n✅ BERTScore 결과가 'bert_scores_comparison_{subject}.csv'로 저장되었습니다.")
-
-# (2) 모델별 RAG/Non-RAG 답변 CSV 추가 저장
-response_rows = []
-for model_name in models.keys():
-    response_rows.append({
-        "Model": model_name,
-        "RAG_Response": rag_responses[model_name],
-        "Non_RAG_Response": non_rag_responses[model_name]
-    })
-
-df_responses = pd.DataFrame(response_rows)
-df_responses.to_csv(f"model_responses_{subject}.csv", index=False, encoding="utf-8-sig")
-print(f"✅ 모델별 RAG/Non-RAG 답변이 'model_responses_{subject}.csv'로 저장되었습니다.")
+print(f"\n✅ RAG/Non-RAG, RAG끼리, Non-RAG끼리 유사도 결과가 'bert_scores_comparison_{subject}.csv'로 저장되었습니다.")

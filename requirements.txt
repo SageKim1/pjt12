@@ -12,3 +12,8 @@ beautifulsoup4
 requests
 matplotlib
 fpdf
+anthropic
+langchain-anthropic
+langchain-huggingface
+sentence-transformers
+pandas
